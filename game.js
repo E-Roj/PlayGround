@@ -22,7 +22,8 @@
   ];
   let currentWind = 4.2, windDir = windDirections[0], windTick = 0, aim = {x:0,y:0}, dimensions={w:800,h:500,dpr:1}, target={x:0,y:0,r:85};
   let shotArrow = null, lastResult = null, toastTimer, resultTimer, animationFrame;
-  let stickPointer = null, stickVector = {x:0,y:0}, stickStart = null, reloadUntil = 0, reloadTimer = 0;
+  let stickPointer = null, stickVector = {x:0,y:0}, stickStableSince = 0, stickStableAnchor = {x:0,y:0}, keyboardAimSince = 0, reloadUntil = 0, reloadTimer = 0;
+  const aimStabilityMs = 550, aimStabilityTolerance = .075;
   let soundOn = false, audioContext = null, masterGain = null, musicTimer = null, musicStep = 0;
 
   function persist(){ localStorage.setItem('windWillowSave',JSON.stringify(save)); }
@@ -141,32 +142,56 @@
     const r=aimPad.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,max=(r.width-44)/2;
     let x=e.clientX-cx,y=e.clientY-cy,len=Math.hypot(x,y);
     if(len>max){x=x/len*max;y=y/len*max}
-    stickVector={x:x/max,y:y/max};padKnob.style.transform=`translate(${x}px,${y}px)`;
+    stickVector={x:x/max,y:y/max};
+    if(Math.hypot(stickVector.x-stickStableAnchor.x,stickVector.y-stickStableAnchor.y)>aimStabilityTolerance){
+      stickStableAnchor={...stickVector};stickStableSince=performance.now();
+    }
+    padKnob.style.transform=`translate(${x}px,${y}px)`;
     const reach=target.r*1.35;aim={x:stickVector.x*reach,y:stickVector.y*reach};
-    $('scene-hint').classList.add('hidden');draw();
+    $('scene-hint').classList.add('hidden');updateAimFeedback();draw();
+  }
+  function updateAimFeedback(){
+    if(stickPointer===null&&!keyboardAimSince)return;
+    const elapsed=performance.now()-(keyboardAimSince||stickStableSince),stable=elapsed>=aimStabilityMs;
+    $('shoot-tip').textContent=stable?'STEADY · RELEASE TO SHOOT':`HOLD STEADY · ${Math.max(0,(aimStabilityMs-elapsed)/1000).toFixed(1)}s`;
+    aimPad.classList.toggle('aim-stable',stable);
   }
   aimPad.addEventListener('pointerdown',e=>{
-    if(shotArrow||performance.now()<reloadUntil||stickPointer!==null)return;
-    e.preventDefault();stickPointer=e.pointerId;stickStart={x:e.clientX,y:e.clientY,center:Math.hypot(e.clientX-(aimPad.getBoundingClientRect().left+aimPad.getBoundingClientRect().width/2),e.clientY-(aimPad.getBoundingClientRect().top+aimPad.getBoundingClientRect().height/2))<12};
-    aimPad.setPointerCapture(e.pointerId);
-    if(!stickStart.center)updateStick(e);
+    if(shotArrow||performance.now()<reloadUntil||stickPointer!==null||keyboardAimSince)return;
+    e.preventDefault();stickPointer=e.pointerId;stickStableSince=performance.now();stickStableAnchor={x:0,y:0};
+    aimPad.setPointerCapture(e.pointerId);updateStick(e);
   });
   aimPad.addEventListener('pointermove',e=>{
     if(stickPointer!==e.pointerId)return;
-    if(stickStart&&Math.hypot(e.clientX-stickStart.x,e.clientY-stickStart.y)>10)stickStart.center=false;
     updateStick(e);
   });
   function releaseStick(e,canceled=false){
     if(stickPointer!==e.pointerId)return;
-    e.preventDefault();const fire=!!(stickStart&&stickStart.center&&!canceled&&Math.hypot(e.clientX-stickStart.x,e.clientY-stickStart.y)<=10);
-    stickPointer=null;stickStart=null;
+    e.preventDefault();if(!canceled)updateStick(e);
+    const fire=!canceled&&performance.now()-stickStableSince>=aimStabilityMs;
+    stickPointer=null;stickStableSince=0;aimPad.classList.remove('aim-stable');
+    $('shoot-tip').textContent='MOVE THE D-PAD TO AIM · HOLD STEADY · RELEASE TO SHOOT';
     if(aimPad.hasPointerCapture(e.pointerId))aimPad.releasePointerCapture(e.pointerId);
-    if(fire)shoot();
+    if(fire)shoot();else if(!canceled)toast('Hold your aim steady for a moment, then release.');
   }
   aimPad.addEventListener('pointerup',e=>releaseStick(e));
   aimPad.addEventListener('pointercancel',e=>releaseStick(e,true));
-  aimPad.addEventListener('lostpointercapture',e=>{if(stickPointer===e.pointerId){stickPointer=null;stickStart=null}});
-  aimPad.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();shoot()}});
+  aimPad.addEventListener('lostpointercapture',e=>{if(stickPointer===e.pointerId){stickPointer=null;stickStableSince=0;aimPad.classList.remove('aim-stable');$('shoot-tip').textContent='MOVE THE D-PAD TO AIM · HOLD STEADY · RELEASE TO SHOOT'}});
+  aimPad.addEventListener('keydown',e=>{
+    if((e.key===' '||e.key==='Enter')&&!e.repeat){
+      e.preventDefault();
+      if(shotArrow||performance.now()<reloadUntil||stickPointer!==null||keyboardAimSince)return;
+      keyboardAimSince=performance.now();updateAimFeedback();
+    }
+  });
+  aimPad.addEventListener('keyup',e=>{
+    if((e.key===' '||e.key==='Enter')&&keyboardAimSince){
+      e.preventDefault();const fire=performance.now()-keyboardAimSince>=aimStabilityMs;
+      keyboardAimSince=0;aimPad.classList.remove('aim-stable');$('shoot-tip').textContent='MOVE THE D-PAD TO AIM · HOLD STEADY · RELEASE TO SHOOT';
+      if(fire)shoot();else toast('Hold your aim steady for a moment, then release.');
+    }
+  });
+  window.addEventListener('blur',()=>{keyboardAimSince=0;aimPad.classList.remove('aim-stable');$('shoot-tip').textContent='MOVE THE D-PAD TO AIM · HOLD STEADY · RELEASE TO SHOOT'});
   function shoot(){
     if(shotArrow||performance.now()<reloadUntil){updateReloadUI();return}
     const area=areas[save.area], bowSteadiness=Math.max(.28,1-(save.bow-1)*.18), arrowDrift=Math.max(.25,1-(save.arrow-1)*.19);
@@ -245,12 +270,12 @@
     document.querySelectorAll('.area-option').forEach(btn=>btn.addEventListener('click',()=>{const i=Number(btn.dataset.area);if(i<=save.area){changeArea(i);closeModal();return}const cost=areas[i].cost;if(save.coins>=cost){save.coins-=cost;changeArea(i);persist();updateUI();closeModal();toast(`${areas[i].name} unlocked!`)}else toast(`You need ${cost-save.coins} more coins to unlock this range.`)}));
   }
   function changeArea(i){save.area=i;aim={x:0,y:0};stickVector={x:0,y:0};padKnob.style.transform='translate(0,0)';windTick=0;setWind();updateUI();resize();toast(`Welcome to ${areas[i].name}`)}
-  $('help-button').addEventListener('click',()=>openModal('Find your <em>focus.</em>','A quiet hand, a little patience, and a good read of the breeze.',`<ol class="help-list"><li><b>Move the D-pad</b> to steer your aim. Push farther for a wider correction; your aim stays put when you lift your finger.</li><li><b>Tap the D-pad center</b> to shoot. Your aim returns to center after each shot.</li><li>The wind can blow in <b>six directions</b>. Aim against the arrow to compensate.</li><li>Land in the gold center for <b>3 coins</b>. Bow upgrades reduce wobble; arrow upgrades strongly resist wind. Quick nock shortens reloads.</li></ol><button class="modal-action" id="got-it">BACK TO THE RANGE</button>`));
+  $('help-button').addEventListener('click',()=>openModal('Find your <em>focus.</em>','A quiet hand, a little patience, and a good read of the breeze.',`<ol class="help-list"><li><b>Move the D-pad</b> to steer your aim. Hold your chosen direction steady for about half a second; the prompt will confirm when it is steady.</li><li><b>Release the D-pad</b> to shoot. A quick or unsteady touch will not fire; your aim stays put so you can try again. The controls lock while the arrow flies and the bow reloads.</li><li>The wind can blow in <b>six directions</b>. Aim against the arrow to compensate.</li><li>Land in the gold center for <b>3 coins</b>. Bow upgrades reduce wobble; arrow upgrades strongly resist wind. Quick nock shortens reloads.</li></ol><button class="modal-action" id="got-it">BACK TO THE RANGE</button>`));
   document.addEventListener('click',e=>{if(e.target.id==='got-it')closeModal()});
   $('upgrade-bow').addEventListener('click',()=>buyUpgrade('bow'));$('upgrade-arrow').addEventListener('click',()=>buyUpgrade('arrow'));$('upgrade-reload').addEventListener('click',()=>buyUpgrade('reload'));
   function buyUpgrade(type){const level=save[type],cost=upgradeCost(level,type);if(level>=5)return;if(save.coins<cost){toast(`You need ${cost-save.coins} more coins.`);return}save.coins-=cost;save[type]++;persist();updateUI();draw();toast(`${type==='bow'?'Bow':type==='arrow'?'Arrow':'Reload'} upgraded to level ${save[type]}!`);playSound('upgrade')}
   function setWind(){const range=areas[save.area].wind;currentWind=Math.abs(Math.random()*(range[1]-range[0])+range[0]);currentWind=+currentWind.toFixed(1);windDir=windDirections[Math.floor(Math.random()*windDirections.length)];updateUI()}
-  function animate(){if(!shotArrow){windTick+=1/60;if(windTick>13){windTick=0;setWind()} }updateReloadUI();draw();animationFrame=requestAnimationFrame(animate)}
+  function animate(){if(!shotArrow){windTick+=1/60;if(windTick>13){windTick=0;setWind()} }updateAimFeedback();updateReloadUI();draw();animationFrame=requestAnimationFrame(animate)}
   window.addEventListener('resize',resize,{passive:true});
   updateUI();resize();animate();
 })();
