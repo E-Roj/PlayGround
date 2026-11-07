@@ -149,6 +149,33 @@
   function drawFlyingArrow(a){const p=Math.min(1,(performance.now()-a.start)/a.duration),ease=1-Math.pow(1-p,3),x=a.fromX+(a.x-a.fromX)*ease,y=a.fromY+(a.y-a.fromY)*ease-Math.sin(p*Math.PI)*35*(dimensions.w/800);ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(a.y-a.fromY,a.x-a.fromX));ctx.strokeStyle='#432e1f';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(7,0);ctx.stroke();ctx.fillStyle='#d5c6a2';ctx.beginPath();ctx.moveTo(9,0);ctx.lineTo(4,-3);ctx.lineTo(4,3);ctx.fill();ctx.fillStyle='#e7e1cc';ctx.beginPath();ctx.moveTo(-15,0);ctx.lineTo(-21,-4);ctx.lineTo(-18,0);ctx.lineTo(-21,4);ctx.closePath();ctx.fill();ctx.restore();if(p>=1){shotArrow=null;completeShot(a);draw()}}
 
   const aimPad=$('aim-pad'), padKnob=$('pad-knob');
+  let touchAimPointer=null;
+  function updateFingerAim(e){
+    const rect=canvas.getBoundingClientRect();
+    const reach=target.r*1.35;
+    const x=e.clientX-rect.left-target.x, y=e.clientY-rect.top-target.y;
+    const len=Math.hypot(x,y), factor=len>reach?reach/len:1;
+    aim={x:x*factor,y:y*factor};
+    $('scene-hint').classList.add('hidden');
+    $('shoot-tip').textContent='FINGER AIM · RELEASE TO SHOOT';
+    draw();
+  }
+  canvas.addEventListener('pointerdown',e=>{
+    if(e.pointerType!=='touch'||shotArrow||performance.now()<reloadUntil||touchAimPointer!==null||stickPointer!==null||keyboardAimSince)return;
+    e.preventDefault();touchAimPointer=e.pointerId;canvas.setPointerCapture(e.pointerId);updateFingerAim(e);
+  });
+  canvas.addEventListener('pointermove',e=>{if(touchAimPointer===e.pointerId)updateFingerAim(e)});
+  function releaseFingerAim(e,canceled=false){
+    if(touchAimPointer!==e.pointerId)return;
+    e.preventDefault();if(!canceled)updateFingerAim(e);
+    touchAimPointer=null;
+    if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
+    if(!canceled)shoot();
+    else $('shoot-tip').textContent='D-PAD: HOLD STEADY · RELEASE TO SHOOT · TOUCH RANGE TO AIM';
+  }
+  canvas.addEventListener('pointerup',e=>releaseFingerAim(e));
+  canvas.addEventListener('pointercancel',e=>releaseFingerAim(e,true));
+  canvas.addEventListener('lostpointercapture',e=>{if(touchAimPointer===e.pointerId){touchAimPointer=null;$('shoot-tip').textContent='D-PAD: HOLD STEADY · RELEASE TO SHOOT · TOUCH RANGE TO AIM'}});
   function updateStick(e){
     if(stickPointer!==e.pointerId||shotArrow||performance.now()<reloadUntil)return;
     const r=aimPad.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,max=(r.width-44)/2;
@@ -226,11 +253,18 @@
     const dx=a.x-target.x,dy=a.y-target.y,dist=Math.hypot(dx,dy),ratio=dist/target.r;
     const bull=ratio<=.12, hit=ratio<=.91;
     save.shots++;let reward=0;
-    if(hit){save.hits++;if(a.challenge){if(bull)reward=areas[save.area].reward*10}else reward=areas[save.area].reward*(bull?3:1);save.coins+=reward;}
+    if(hit){
+      save.hits++;
+      const areaReward=Math.max(1,Math.floor(Number(areas[save.area].reward)||1));
+      if(a.challenge){if(bull)reward=areaReward*10}
+      else reward=areaReward*(bull?3:1);
+      save.coins=(Number(save.coins)||0)+reward;
+    }
     const accuracy=Math.max(0,Math.round((1-Math.min(1,ratio))*100));save.best=Math.max(save.best,accuracy);persist();
     lastResult={x:a.x,y:a.y,visible:true};
-    const stamp=$('result-stamp');$('result-icon').textContent=hit?(bull?'✦':'◉'):'↗';$('result-title').textContent=bull?"BULL'S-EYE!":hit?'ON TARGET':'JUST WIDE';
-    $('result-subtitle').textContent=bull?`PERFECT SHOT · +${reward} COINS`:hit?`NICE SHOT · +${reward} COIN${reward===1?'':'S'}`:'THE WIND GOT THIS ONE';
+    const challengeNoBonus=hit&&a.challenge&&!bull;
+    const stamp=$('result-stamp');$('result-icon').textContent=hit?(bull?'✦':'◉'):'↗';$('result-title').textContent=bull?"BULL'S-EYE!":challengeNoBonus?'CHALLENGE HIT':hit?'ON TARGET':'JUST WIDE';
+    $('result-subtitle').textContent=bull?`PERFECT SHOT · +${reward} COINS`:challengeNoBonus?'HIGH-WIND HIT · NO COINS':hit?`NICE SHOT · +${reward} COIN${reward===1?'':'S'}`:'THE WIND GOT THIS ONE';
     stamp.classList.add('visible');clearTimeout(resultTimer);resultTimer=setTimeout(()=>{stamp.classList.remove('visible');if(lastResult)lastResult.visible=false;draw()},1900);
     updateUI();
     if(hit){playSound(bull?'bull':'hit');toast(a.challenge?(bull?`Challenge bull’s-eye! +${reward} coins`:'Challenge hit—but only a bull’s-eye earns the bonus.'):(bull?`Bull’s-eye! Hooray! +${reward} coins`:`On target! +${reward} coin${reward===1?'':'s'}`))}else{playSound('miss');toast(a.challenge?'Challenge missed. The gusts won this round.':'A little wide. Read the wind and try again.')}
@@ -297,7 +331,7 @@
     document.querySelectorAll('.area-option').forEach(btn=>btn.addEventListener('click',()=>{const i=Number(btn.dataset.area);if(i<=save.area){changeArea(i);closeModal();return}const cost=areas[i].cost;if(save.coins>=cost){save.coins-=cost;changeArea(i);persist();updateUI();closeModal();toast(`${areas[i].name} unlocked!`)}else toast(`You need ${cost-save.coins} more coins to unlock this range.`)}));
   }
   function changeArea(i){save.area=i;aim={x:0,y:0};stickVector={x:0,y:0};padKnob.style.transform='translate(0,0)';windTick=0;musicStep=0;setWind();updateUI();resize();if(soundOn&&audioContext)startMusic();toast(`Welcome to ${areas[i].name}`)}
-  $('help-button').addEventListener('click',()=>openModal('Find your <em>focus.</em>','A quiet hand, a little patience, and a good read of the breeze.',`<ol class="help-list"><li><b>Move the D-pad</b> to steer your aim. Hold your chosen direction steady for about half a second; the prompt will confirm when it is steady.</li><li><b>Release the D-pad</b> to shoot. A quick or unsteady touch will not fire; your aim stays put so you can try again. The controls lock while the arrow flies and the bow reloads.</li><li>The wind can blow in <b>six directions</b>. Aim against the arrow to compensate. Each region has its own music theme.</li><li>Land in the gold center for <b>${areas[save.area].reward*3} coins</b>. Occasional high-wind challenge shots pay <b>${areas[save.area].reward*10} coins</b> for a bull’s-eye only. Bow upgrades reduce wobble; arrow upgrades strongly resist wind. Quick nock shortens reloads.</li><li>Use <b>Reset Game</b> to clear your saved progress and start over.</li></ol><button class="modal-action" id="got-it">BACK TO THE RANGE</button>`));
+  $('help-button').addEventListener('click',()=>openModal('Find your <em>focus.</em>','A quiet hand, a little patience, and a good read of the breeze.',`<ol class="help-list"><li><b>Touch and drag on the range</b> to place your aim; lift your finger to shoot. Or use the D-pad to steer your aim.</li><li>With the <b>D-pad</b>, hold your chosen direction steady for about half a second, then release to shoot. A quick or unsteady hold will not fire. The controls lock while the arrow flies and the bow reloads.</li><li>The wind can blow in <b>six directions</b>. Aim against the arrow to compensate. Each region has its own music theme.</li><li>Land in the gold center for <b>${areas[save.area].reward*3} coins</b>. Occasional high-wind challenge shots pay <b>${areas[save.area].reward*10} coins</b> for a bull’s-eye only. Bow upgrades reduce wobble; arrow upgrades strongly resist wind. Quick nock shortens reloads.</li><li>Use <b>Reset Game</b> to clear your saved progress and start over.</li></ol><button class="modal-action" id="got-it">BACK TO THE RANGE</button>`));
   document.addEventListener('click',e=>{if(e.target.id==='got-it'||e.target.id==='cancel-reset')closeModal();if(e.target.id==='confirm-reset')resetGame()});
   $('upgrade-bow').addEventListener('click',()=>buyUpgrade('bow'));$('upgrade-arrow').addEventListener('click',()=>buyUpgrade('arrow'));$('upgrade-reload').addEventListener('click',()=>buyUpgrade('reload'));
   function resetGame(){save={...defaultSave};persist();shotArrow=null;lastResult=null;reloadUntil=0;aim={x:0,y:0};stickVector={x:0,y:0};stickPointer=null;keyboardAimSince=0;padKnob.style.transform='translate(0,0)';$('result-stamp').classList.remove('visible');challengeActive=false;lastShotWasChallenge=false;windTick=0;musicStep=0;closeModal();setWind();updateUI();resize();if(soundOn&&audioContext)startMusic();toast('Progress reset. A fresh range awaits.')}
