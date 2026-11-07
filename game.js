@@ -1,0 +1,146 @@
+(() => {
+  const $ = id => document.getElementById(id);
+  const canvas = $('scene'), ctx = canvas.getContext('2d');
+  const areas = [
+    {name:'Pinewood Meadow', short:'PINEWOOD MEADOW', distance:30, wind:[-1,5], color:['#b8c6a9','#d6d5aa','#6e8968','#415b45'], reward:1, cost:0},
+    {name:'Sunstone Canyon', short:'SUNSTONE CANYON', distance:55, wind:[-3,7], color:['#e4b98d','#efcf9d','#c18760','#865b49'], reward:2, cost:12},
+    {name:'Frostline Ridge', short:'FROSTLINE RIDGE', distance:80, wind:[-6,5], color:['#c1d5d4','#e8e4d7','#879fa0','#667b7c'], reward:3, cost:35},
+    {name:'Golden Dunes', short:'GOLDEN DUNES', distance:110, wind:[-8,8], color:['#d9b786','#e9d29f','#bd9156','#9a7045'], reward:5, cost:80}
+  ];
+  const bows = ['Willow longbow','Ash recurve','Yew warbow','Ranger’s bow','Elderwood bow'];
+  const arrows = ['Pine shaft','Cedar flight','Ash feather','Carbon swift','Eagle-fletch'];
+  const defaultSave = {coins:0,bow:1,arrow:1,area:0,shots:0,hits:0,best:0};
+  let save = {...defaultSave};
+  try { save = {...save,...JSON.parse(localStorage.getItem('windWillowSave') || '{}')}; } catch(e) {}
+  let currentWind = 4.2, windDir = 1, windTick = 0, aim = {x:0,y:0}, dimensions={w:800,h:500,dpr:1}, target={x:0,y:0,r:85};
+  let shotArrow = null, lastResult = null, toastTimer, resultTimer, animationFrame;
+  let soundOn = false;
+
+  function persist(){ localStorage.setItem('windWillowSave',JSON.stringify(save)); }
+  function updateUI(){
+    $('coin-count').textContent=save.coins; $('area-title').innerHTML=areas[save.area].name.replace(' ', ' <em>')+'</em>';
+    $('area-label').textContent=`AREA 0${save.area+1} / 04`; $('distance').textContent=areas[save.area].distance;
+    $('bow-name').textContent=bows[Math.min(save.bow-1,bows.length-1)]; $('arrow-name').textContent=arrows[Math.min(save.arrow-1,arrows.length-1)];
+    $('bow-stat').innerHTML=`POWER <b>0${save.bow}</b> <span>·</span> STABILITY <b>0${save.bow}</b>`;
+    $('arrow-stat').innerHTML=`FLIGHT <b>0${save.arrow}</b> <span>·</span> TIP <b>0${save.arrow}</b>`;
+    $('bow-cost').textContent=save.bow>=5?'MAX':`${upgradeCost(save.bow)} ◉`; $('arrow-cost').textContent=save.arrow>=5?'MAX':`${upgradeCost(save.arrow)} ◉`;
+    $('upgrade-bow').disabled=save.bow>=5||save.coins<upgradeCost(save.bow); $('upgrade-arrow').disabled=save.arrow>=5||save.coins<upgradeCost(save.arrow);
+    $('shot-count').textContent=`SHOT ${String(save.shots%6+1).padStart(2,'0')}`; $('round-count').textContent=`ROUND ${String(Math.floor(save.shots/6)+1).padStart(2,'0')}`;
+    $('best-score').textContent=save.best?`${save.best}%`:'—'; $('accuracy-value').textContent=save.shots?`${Math.round(save.hits/save.shots*100)}%`:'—'; $('accuracy-fill').style.width=save.shots?`${Math.round(save.hits/save.shots*100)}%`:'0%';
+    $('wind-speed').textContent=currentWind.toFixed(1); $('wind-arrow').style.transform=`scaleX(${windDir})`; $('wind-fill').style.width=`${Math.min(100,currentWind*10)}%`;
+    $('wind-direction').textContent=`CROSSWIND · ${windDir>0?'RIGHT':'LEFT'}`;
+  }
+  function upgradeCost(level){return level*5;}
+  function resize(){
+    const rect=canvas.getBoundingClientRect(); if(!rect.width||!rect.height)return;
+    const dpr=Math.min(window.devicePixelRatio||1,2); dimensions={w:rect.width,h:rect.height,dpr};
+    canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
+    const w=rect.width,h=rect.height; target={x:w*.635,y:h*.49,r:Math.min(w*.111,h*.19)};
+    draw();
+  }
+  function draw(){
+    const {w,h}=dimensions;if(!w||!h)return;
+    const palette=areas[save.area].color, scale=w/800;
+    const sky=ctx.createLinearGradient(0,0,0,h*.72);sky.addColorStop(0,palette[0]);sky.addColorStop(.64,palette[1]);sky.addColorStop(1,'#e3dcb9');ctx.fillStyle=sky;ctx.fillRect(0,0,w,h);
+    // soft haze and sun
+    ctx.fillStyle='#fff5d929';ctx.beginPath();ctx.arc(w*.17,h*.21,45*scale,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff6d97a';ctx.beginPath();ctx.arc(w*.17,h*.21,24*scale,0,Math.PI*2);ctx.fill();
+    mountainLayer(w,h,palette[2],.42,.16,.13,0); mountainLayer(w,h,palette[3],.53,.22,.12,1);
+    // far tree line
+    ctx.fillStyle=palette[3]+'b5';for(let i=0;i<27;i++){let x=i*w/25+(i%3)*3,y=h*.51+(i%4)*2;pine(x,y,7*scale,18*scale,ctx.fillStyle)}
+    // ground perspective
+    let ground=ctx.createLinearGradient(0,h*.53,0,h);ground.addColorStop(0,'#82916d');ground.addColorStop(.45,palette[2]);ground.addColorStop(1,palette[3]);ctx.fillStyle=ground;ctx.beginPath();ctx.moveTo(0,h*.52);ctx.lineTo(w,h*.52);ctx.lineTo(w,h);ctx.lineTo(0,h);ctx.closePath();ctx.fill();
+    // rolling banks
+    ctx.fillStyle=palette[2]+'cc';ctx.beginPath();ctx.moveTo(0,h*.66);ctx.quadraticCurveTo(w*.22,h*.51,w*.45,h*.68);ctx.quadraticCurveTo(w*.72,h*.76,w,h*.57);ctx.lineTo(w,h);ctx.lineTo(0,h);ctx.fill();
+    // distant scattered evergreens
+    for(let i=0;i<18;i++){const x=((i*173+71)%w),y=h*(.53+(i%5)*.045),s=(.35+(i%4)*.17)*scale;pine(x,y,8*s,20*s,i%2?palette[3]:'#627b5d')}
+    // shooting lane path, perspective
+    ctx.fillStyle='#e2d9bd88';ctx.beginPath();ctx.moveTo(w*.43,h);ctx.lineTo(w*.57,h);ctx.lineTo(w*.625,h*.55);ctx.lineTo(w*.59,h*.55);ctx.closePath();ctx.fill();
+    ctx.strokeStyle='#efe6c780';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(w*.5,h);ctx.lineTo(w*.605,h*.56);ctx.stroke();
+    // foreground grasses
+    for(let i=0;i<40;i++){const x=(i*89+12)%w,y=h*(.77+(i%7)*.035);ctx.strokeStyle=i%2?'#314f39a0':'#c3c28c9a';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,y+5);ctx.quadraticCurveTo(x+(i%2?5:-5),y-6,x+(i%2?7:-7),y-13);ctx.stroke()}
+    drawTarget(w,h,scale);
+    // floating range markers
+    ctx.strokeStyle='#f8f3da60';ctx.lineWidth=1;ctx.setLineDash([3,5]);ctx.beginPath();ctx.moveTo(target.x,target.y+target.r*1.1);ctx.lineTo(target.x,h*.88);ctx.stroke();ctx.setLineDash([]);
+    // reticle
+    const rx=target.x+aim.x,ry=target.y+aim.y;
+    ctx.strokeStyle='#fffdf0dd';ctx.lineWidth=1.3;ctx.beginPath();ctx.arc(rx,ry,8,0,Math.PI*2);ctx.moveTo(rx-13,ry);ctx.lineTo(rx-4,ry);ctx.moveTo(rx+4,ry);ctx.lineTo(rx+13,ry);ctx.moveTo(rx,ry-13);ctx.lineTo(rx,ry-4);ctx.moveTo(rx,ry+4);ctx.lineTo(rx,ry+13);ctx.stroke();
+    ctx.fillStyle='#fffdf0';ctx.beginPath();ctx.arc(rx,ry,1.3,0,Math.PI*2);ctx.fill();
+    if(shotArrow){drawFlyingArrow(shotArrow);}
+    // bow silhouette on the lower left
+    drawBow(w,h,scale);
+  }
+  function mountainLayer(w,h,color,base,amp,phase,variant){ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(0,h*base);for(let x=0;x<=w;x+=w/8){let y=h*(base-amp*(.3+Math.abs(Math.sin(x/w*Math.PI*2+phase))*((x/w*5%1)*.7+.3)));ctx.lineTo(x,y)}ctx.lineTo(w,h*.59);ctx.lineTo(0,h*.59);ctx.closePath();ctx.fill();}
+  function pine(x,y,width,height,color){ctx.fillStyle=color;ctx.fillRect(x-width*.09,y-height*.1,width*.18,height*.22);ctx.beginPath();ctx.moveTo(x,y-height);ctx.lineTo(x-width*.55,y-height*.34);ctx.lineTo(x-width*.22,y-height*.4);ctx.lineTo(x-width*.72,y-height*.05);ctx.lineTo(x+width*.72,y-height*.05);ctx.lineTo(x+width*.22,y-height*.4);ctx.lineTo(x+width*.55,y-height*.34);ctx.closePath();ctx.fill();}
+  function drawTarget(w,h,scale){
+    const {x,y,r}=target;
+    // stand and ground shadow
+    ctx.fillStyle='#293c2d45';ctx.beginPath();ctx.ellipse(x,y+r*1.55,r*1.5,r*.2,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#735438';ctx.fillRect(x-r*.075,y+r*.73,r*.15,h*.37);ctx.fillStyle='#a98252';ctx.fillRect(x-r*.045,y+r*.75,r*.045,h*.34);
+    // stand braces
+    ctx.strokeStyle='#634b35';ctx.lineWidth=3*scale;ctx.beginPath();ctx.moveTo(x-r*.06,y+r*1.05);ctx.lineTo(x-r*.52,y+r*1.55);ctx.moveTo(x+r*.06,y+r*1.05);ctx.lineTo(x+r*.53,y+r*1.55);ctx.stroke();
+    // outer wooden board and face
+    ctx.fillStyle='#704f38';ctx.beginPath();ctx.ellipse(x,y,r*1.09,r*1.09,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#c9ac7d';ctx.beginPath();ctx.ellipse(x,y,r*1.025,r*1.025,0,0,Math.PI*2);ctx.fill();
+    const rings=['#f0ead4','#617b5b','#f2ead3','#b85f49','#eee7d0','#d3a348'];
+    for(let i=0;i<rings.length;i++){let rr=r*(.91-i*.145);ctx.fillStyle=rings[i];ctx.beginPath();ctx.arc(x,y,rr,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#52634d55';ctx.lineWidth=.8*scale;ctx.stroke()}
+    ctx.fillStyle='#f4dd8a';ctx.beginPath();ctx.arc(x,y,r*.115,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff4c4';ctx.lineWidth=1;ctx.stroke();
+    // softly lit edge and subtle grain
+    ctx.strokeStyle='#fff8dc75';ctx.lineWidth=1.3*scale;ctx.beginPath();ctx.ellipse(x,y,r*1.02,r*1.02,-.08,Math.PI*1.03,Math.PI*1.9);ctx.stroke();
+    if(lastResult&&lastResult.visible){ctx.fillStyle='#242d2133';ctx.beginPath();ctx.arc(lastResult.x,lastResult.y,2.1,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#282d24';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(lastResult.x-5,lastResult.y);ctx.lineTo(lastResult.x+5,lastResult.y);ctx.stroke()}
+  }
+  function drawBow(w,h,s){ctx.save();ctx.globalAlpha=.77;ctx.strokeStyle='#342e24';ctx.lineWidth=6*s;ctx.beginPath();ctx.moveTo(w*.065,h*1.04);ctx.quadraticCurveTo(w*.17,h*.78,w*.095,h*.58);ctx.quadraticCurveTo(w*.055,h*.46,w*.14,h*.43);ctx.stroke();ctx.strokeStyle='#bd9862';ctx.lineWidth=3.6*s;ctx.beginPath();ctx.moveTo(w*.065,h*1.04);ctx.quadraticCurveTo(w*.17,h*.78,w*.095,h*.58);ctx.quadraticCurveTo(w*.055,h*.46,w*.14,h*.43);ctx.stroke();ctx.strokeStyle='#eee6d0';ctx.lineWidth=1*s;ctx.beginPath();ctx.moveTo(w*.065,h*1.04);ctx.lineTo(w*.14,h*.43);ctx.stroke();ctx.restore()}
+  function drawFlyingArrow(a){const p=Math.min(1,(performance.now()-a.start)/a.duration),ease=1-Math.pow(1-p,3),x=a.fromX+(a.x-a.fromX)*ease,y=a.fromY+(a.y-a.fromY)*ease-Math.sin(p*Math.PI)*35*(dimensions.w/800);ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(a.y-a.fromY,a.x-a.fromX));ctx.strokeStyle='#432e1f';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(7,0);ctx.stroke();ctx.fillStyle='#d5c6a2';ctx.beginPath();ctx.moveTo(9,0);ctx.lineTo(4,-3);ctx.lineTo(4,3);ctx.fill();ctx.fillStyle='#e7e1cc';ctx.beginPath();ctx.moveTo(-15,0);ctx.lineTo(-21,-4);ctx.lineTo(-18,0);ctx.lineTo(-21,4);ctx.closePath();ctx.fill();ctx.restore();if(p>=1){shotArrow=null;completeShot(a);draw()}}
+
+  function getPoint(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}
+  canvas.addEventListener('pointerdown',e=>{if(shotArrow)return;canvas.setPointerCapture(e.pointerId);const p=getPoint(e);aim={x:p.x-target.x,y:p.y-target.y};clampAim();$('scene-hint').classList.add('hidden');draw();});
+  canvas.addEventListener('pointermove',e=>{if(!canvas.hasPointerCapture(e.pointerId)||shotArrow)return;const p=getPoint(e);aim={x:p.x-target.x,y:p.y-target.y};clampAim();draw();});
+  function clampAim(){aim.x=Math.max(-dimensions.w*.52,Math.min(dimensions.w*.47,aim.x));aim.y=Math.max(-dimensions.h*.48,Math.min(dimensions.h*.48,aim.y));}
+  $('shoot-button').addEventListener('click',shoot);
+  function shoot(){
+    if(shotArrow)return;
+    const area=areas[save.area], power=Math.max(.65,1-(save.bow-1)*.095), flight=Math.max(.55,1-(save.arrow-1)*.105);
+    const windDrift=windDir*currentWind*(area.distance/30)*2.05*flight;
+    const stability=4.8/power + 2.8/flight;
+    const wobbleX=(Math.random()-.5)*stability, wobbleY=(Math.random()-.5)*stability;
+    const hitX=target.x+aim.x+windDrift+wobbleX, hitY=target.y+aim.y+wobbleY;
+    shotArrow={x:hitX,y:hitY,fromX:dimensions.w*.115,fromY:dimensions.h*.72,start:performance.now(),duration:580+area.distance*2.7,hit:true,windDrift};
+    $('scene-hint').classList.add('hidden');$('shoot-button').disabled=true;$('shoot-button').style.opacity='.65';
+    $('shot-flash').classList.remove('active');void $('shot-flash').offsetWidth;$('shot-flash').classList.add('active');playSound(180,.07);
+    requestAnimationFrame(draw);
+  }
+  function completeShot(a){
+    const dx=a.x-target.x,dy=a.y-target.y,dist=Math.hypot(dx,dy),ratio=dist/target.r;
+    const bull=ratio<=.12, hit=ratio<=.91;
+    save.shots++;let reward=0;
+    if(hit){save.hits++;reward=areas[save.area].reward*(bull?3:1);save.coins+=reward;}
+    const accuracy=Math.max(0,Math.round((1-Math.min(1,ratio))*100));save.best=Math.max(save.best,accuracy);persist();
+    lastResult={x:a.x,y:a.y,visible:true};
+    const stamp=$('result-stamp');$('result-icon').textContent=hit?(bull?'✦':'◉'):'↗';$('result-title').textContent=bull?"BULL'S-EYE!":hit?'ON TARGET':'JUST WIDE';
+    $('result-subtitle').textContent=bull?`PERFECT SHOT · +${reward} COINS`:hit?`NICE SHOT · +${reward} COIN${reward===1?'':'S'}`:'THE WIND GOT THIS ONE';
+    stamp.classList.add('visible');clearTimeout(resultTimer);resultTimer=setTimeout(()=>{stamp.classList.remove('visible');if(lastResult)lastResult.visible=false;draw()},1900);
+    updateUI();$('shoot-button').disabled=false;$('shoot-button').style.opacity='1';
+    if(hit){playSound(bull?580:420,.13);toast(bull?`Bull’s-eye! +${reward} coins`:`On target! +${reward} coin${reward===1?'':'s'}`)}else{toast('A little wide. Read the wind and try again.')}
+    draw();
+  }
+  function toast(message){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2100)}
+  function playSound(freq,duration){if(!soundOn)return;try{const ac=new(window.AudioContext||window.webkitAudioContext)(),o=ac.createOscillator(),g=ac.createGain();o.type='triangle';o.frequency.value=freq;g.gain.setValueAtTime(.055,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+duration);o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+duration)}catch(e){}}
+  $('sound-button').addEventListener('click',()=>{soundOn=!soundOn;$('sound-button').textContent=soundOn?'♫':'♩';toast(soundOn?'Sound on':'Sound off')});
+
+  function openModal(title,copy,content){$('modal-title').innerHTML=title;$('modal-copy').textContent=copy;$('modal-content').innerHTML=content;$('modal-backdrop').classList.add('open')}
+  function closeModal(){$('modal-backdrop').classList.remove('open')}
+  $('modal-close').addEventListener('click',closeModal);$('modal-backdrop').addEventListener('click',e=>{if(e.target===$('modal-backdrop'))closeModal()});
+  $('area-button').addEventListener('click',showAreas);
+  function showAreas(){
+    const content=`<div class="area-list">${areas.map((a,i)=>{const unlocked=i<=save.area;return `<button class="area-option ${unlocked?'':'locked'}" data-area="${i}"><span class="area-thumb"></span><span><strong>${a.name}</strong><small>${a.distance} METERS · ${a.reward}× REWARD</small></span><span class="area-price">${unlocked?(i===save.area?'PLAYING':'OPEN'):`🔒 ${a.cost} ◉`}</span></button>`}).join('')}</div>`;
+    openModal('Choose your <em>ground.</em>','Every range brings a new distance, a new breeze, and a bigger reward.',content);
+    document.querySelectorAll('.area-option').forEach(btn=>btn.addEventListener('click',()=>{const i=Number(btn.dataset.area);if(i<=save.area){changeArea(i);closeModal();return}const cost=areas[i].cost;if(save.coins>=cost){save.coins-=cost;changeArea(i);persist();updateUI();closeModal();toast(`${areas[i].name} unlocked!`)}else toast(`You need ${cost-save.coins} more coins to unlock this range.`)}));
+  }
+  function changeArea(i){save.area=i;aim={x:0,y:0};windTick=0;setWind();updateUI();resize();toast(`Welcome to ${areas[i].name}`)}
+  $('help-button').addEventListener('click',()=>openModal('Find your <em>focus.</em>','A quiet hand, a little patience, and a good read of the breeze.',`<ol class="help-list"><li><b>Drag anywhere</b> on the range to move your aim.</li><li>Wind pushes each arrow sideways. Aim <b>into the wind</b> to compensate.</li><li>Tap <b>LOOSE ARROW</b> to shoot. Keep inside the rings for a coin.</li><li>Land in the gold center for <b>3 coins</b>. Spend coins on upgrades and new ranges.</li></ol><button class="modal-action" id="got-it">BACK TO THE RANGE</button>`));
+  document.addEventListener('click',e=>{if(e.target.id==='got-it')closeModal()});
+  $('upgrade-bow').addEventListener('click',()=>buyUpgrade('bow'));$('upgrade-arrow').addEventListener('click',()=>buyUpgrade('arrow'));
+  function buyUpgrade(type){const level=save[type],cost=upgradeCost(level);if(level>=5)return;if(save.coins<cost){toast(`You need ${cost-save.coins} more coins.`);return}save.coins-=cost;save[type]++;persist();updateUI();draw();toast(`${type==='bow'?'Bow':'Arrow'} upgraded to level ${save[type]}!`);playSound(520,.1)}
+  function setWind(){const range=areas[save.area].wind;currentWind=+(Math.random()*(range[1]-range[0])+range[0]).toFixed(1);windDir=Math.random()<.5?-1:1;updateUI()}
+  function animate(){if(!shotArrow){windTick+=1/60;if(windTick>13){windTick=0;setWind()} }draw();animationFrame=requestAnimationFrame(animate)}
+  window.addEventListener('resize',resize,{passive:true});
+  updateUI();resize();animate();
+})();
