@@ -27,20 +27,19 @@
 @media (max-width:680px){body{display:block}.game-shell{padding:0 15px;min-height:100dvh}.topbar{height:56px}.brand-mark{width:28px;height:28px;font-size:17px}.brand-name{font-size:10px;letter-spacing:1.3px}.top-meta{gap:13px}.session-pill{font-size:8px;gap:6px}.session-pill .session-num{display:none}.coin-wallet{font-size:8px;gap:5px}.coin-wallet strong{font-size:15px}.coin-icon{font-size:17px}.game-layout{display:flex;flex-direction:column;gap:12px;padding:16px 0 14px}.scene-head{height:54px}.scene-head h1{font-size:23px;margin-top:3px}.area-switch{font-size:8px;height:29px;padding:0 7px;gap:5px}.scene-wrap{height:clamp(280px,43vh,440px);min-height:280px;flex:none}.distance-tag{top:12px;left:12px}.wind-widget{top:10px;right:10px;transform:scale(.87);transform-origin:top right}.range-caption{height:31px;font-size:7px}.caption-center{display:none}.side-panel{display:grid;grid-template-columns:1fr 1fr;gap:9px}.target-card{grid-column:1 / -1;padding:13px 14px}.card h2{font-size:17px}.target-copy{font-size:9px;max-width:unset;margin:6px 0 9px}.target-diagram{margin-bottom:9px;padding:7px 12px}.mini-target{height:51px;width:51px}.target-key{min-width:0;flex:1;margin-left:15px}.gear-card{padding:13px 11px;grid-column:1 / -1}.gear-head{margin-bottom:5px}.gear-row{grid-template-columns:29px minmax(75px,1fr) auto;gap:7px;padding:8px 0}.gear-icon{width:27px;height:27px}.gear-info strong{font-size:9px}.gear-info small{font-size:6px}.upgrade-button{min-width:65px;padding:5px 6px}.upgrade-button span{font-size:6px}.upgrade-button b{font-size:8px}.kit-note{font-size:7px;padding-top:7px}.shoot-controls{grid-column:1 / -1;margin-top:0;padding:11px 13px 9px}.shoot-button{height:42px}.bottom-bar{height:38px;font-size:7px}.bottom-bar span:nth-child(2){display:none}.scene-footer{font-size:7px}.scene-hint{bottom:34px}}
 @media (max-width:380px){.game-shell{padding:0 11px}.session-pill{letter-spacing:.6px}.scene-wrap{height:38vh;min-height:260px}.target-key{margin-left:8px}.target-key>div{gap:4px;font-size:6px}.gear-card{padding:11px 9px}.gear-info small{letter-spacing:0}.bottom-bar{letter-spacing:.6px}}
 
-/* 360-degree trajectory control and a dedicated fire action */
+/* Directional aim pad with a center-tap fire action */
 .aim-pad{position:absolute;z-index:5;right:14px;bottom:57px;width:104px;height:104px;border:1px solid #fff9;border-radius:50%;background:radial-gradient(circle,#30483aa8 0 34%,#172a218c 35% 100%);box-shadow:0 6px 20px #14271d45,inset 0 0 0 5px #ffffff12;touch-action:none;user-select:none;cursor:crosshair;backdrop-filter:blur(3px)}
 .aim-pad:before,.aim-pad:after{content:"";position:absolute;left:50%;top:12%;width:1px;height:76%;background:#fff3;transform:translateX(-50%)}
 .aim-pad:after{transform:translateX(-50%) rotate(90deg)}
-.pad-center{position:absolute;left:50%;top:50%;width:5px;height:5px;border-radius:50%;background:#e2e8c5a8;transform:translate(-50%,-50%)}
+.pad-center{position:absolute;left:50%;top:50%;color:#e2e8c5a8;font:13px 'DM Mono';line-height:1;transform:translate(-50%,-50%);pointer-events:none}
 .pad-mark{position:absolute;z-index:1;color:#e6ead1a8;font:8px 'DM Mono';line-height:1}
 .pad-up{top:8px;left:50%;transform:translateX(-50%)}.pad-right{right:8px;top:50%;transform:translateY(-50%)}.pad-down{bottom:8px;left:50%;transform:translateX(-50%)}.pad-left{left:8px;top:50%;transform:translateY(-50%)}
 .pad-knob{position:absolute;z-index:2;left:50%;top:50%;width:28px;height:28px;border:1px solid #ffffe2;border-radius:50%;background:radial-gradient(circle at 35% 30%,#e0e8bd,#8b9b70 72%,#55674c);box-shadow:0 2px 8px #101a20a8;transform:translate(0,0);margin:-14px;transition:box-shadow .12s}
 .aim-pad:active .pad-knob{box-shadow:0 0 0 4px #dce89c33,0 2px 8px #101a20a8}
+.aim-pad:focus-visible{outline:2px solid #d8e56a;outline-offset:3px}
 .aim-pad.disabled{opacity:.55;cursor:default}
-.loose-button{position:absolute;z-index:5;right:21px;bottom:12px;min-width:90px;padding:7px 12px;border:1px solid #e8e8c3;border-radius:3px;background:#d8e56a;color:#20372b;font:800 9px 'DM Mono';letter-spacing:1px;box-shadow:0 4px 13px #14271d55;cursor:pointer}
-.loose-button b{margin-left:5px;font-size:13px}.loose-button:active:not(:disabled){transform:translateY(1px)}.loose-button:disabled{opacity:.55;cursor:wait}
 .scene-hint{left:16px;right:auto;bottom:18px}
 .shoot-tip{font-size:7px;letter-spacing:.55px}
-@media (max-width:680px){.aim-pad{width:96px;height:96px;right:9px;bottom:52px}.loose-button{right:11px;bottom:9px;min-width:82px;padding:6px 9px}.scene-hint{left:10px;bottom:14px;padding:7px 9px;font-size:7px}.scene-footer span:last-child{padding-right:100px}}
-@media (max-width:380px){.aim-pad{width:88px;height:88px;bottom:50px}.loose-button{bottom:8px}.scene-footer span:last-child{padding-right:91px}}
+@media (max-width:680px){.aim-pad{width:96px;height:96px;right:9px;bottom:52px}.scene-hint{left:10px;bottom:14px;padding:7px 9px;font-size:6px;max-width:calc(100% - 122px)}.scene-footer span:last-child{padding-right:100px}}
+@media (max-width:380px){.aim-pad{width:88px;height:88px;bottom:50px}.scene-footer span:last-child{padding-right:91px}}
 

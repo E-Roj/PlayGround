@@ -12,9 +12,17 @@
   const defaultSave = {coins:0,bow:1,arrow:1,reload:1,area:0,shots:0,hits:0,best:0};
   let save = {...defaultSave};
   try { save = {...save,...JSON.parse(localStorage.getItem('windWillowSave') || '{}')}; } catch(e) {}
-  let currentWind = 4.2, windDir = 1, windTick = 0, aim = {x:0,y:0}, dimensions={w:800,h:500,dpr:1}, target={x:0,y:0,r:85};
+  const windDirections = [
+    {x:1,y:0,label:'RIGHT'},
+    {x:.5,y:Math.sqrt(3)/2,label:'DOWN-RIGHT'},
+    {x:-.5,y:Math.sqrt(3)/2,label:'DOWN-LEFT'},
+    {x:-1,y:0,label:'LEFT'},
+    {x:-.5,y:-Math.sqrt(3)/2,label:'UP-LEFT'},
+    {x:.5,y:-Math.sqrt(3)/2,label:'UP-RIGHT'}
+  ];
+  let currentWind = 4.2, windDir = windDirections[0], windTick = 0, aim = {x:0,y:0}, dimensions={w:800,h:500,dpr:1}, target={x:0,y:0,r:85};
   let shotArrow = null, lastResult = null, toastTimer, resultTimer, animationFrame;
-  let stickPointer = null, stickVector = {x:0,y:0}, reloadUntil = 0, reloadTimer = 0;
+  let stickPointer = null, stickVector = {x:0,y:0}, stickStart = null, reloadUntil = 0, reloadTimer = 0;
   let soundOn = false, audioContext = null, masterGain = null, musicTimer = null, musicStep = 0;
 
   function persist(){ localStorage.setItem('windWillowSave',JSON.stringify(save)); }
@@ -31,8 +39,8 @@
     $('upgrade-reload').disabled=save.reload>=5||save.coins<upgradeCost(save.reload,'reload');
     $('shot-count').textContent=`SHOT ${String(save.shots%6+1).padStart(2,'0')}`; $('round-count').textContent=`ROUND ${String(Math.floor(save.shots/6)+1).padStart(2,'0')}`;
     $('best-score').textContent=save.best?`${save.best}%`:'—'; $('accuracy-value').textContent=save.shots?`${Math.round(save.hits/save.shots*100)}%`:'—'; $('accuracy-fill').style.width=save.shots?`${Math.round(save.hits/save.shots*100)}%`:'0%';
-    $('wind-speed').textContent=currentWind.toFixed(1); $('wind-arrow').style.transform=`scaleX(${windDir})`; $('wind-fill').style.width=`${Math.min(100,currentWind*10)}%`;
-    $('wind-direction').textContent=`CROSSWIND · ${windDir>0?'RIGHT':'LEFT'}`;
+    $('wind-speed').textContent=currentWind.toFixed(1); $('wind-arrow').style.transform=`rotate(${Math.atan2(windDir.y,windDir.x)*180/Math.PI}deg)`; $('wind-fill').style.width=`${Math.min(100,currentWind*10)}%`;
+    $('wind-direction').textContent=`WIND · ${windDir.label}`;
     $('distance').textContent=areas[save.area].distance;
     updateReloadUI();
   }
@@ -45,7 +53,6 @@
     $('reload-countdown').textContent=ready?'BOW READY':`READY IN ${(remaining/1000).toFixed(1)}s`;
     $('reload-fill').style.transform=`scaleX(${ready?1:1-remaining/duration})`;
     $('shoot-controls').classList.toggle('reloading',!ready);
-    $('loose-button').disabled=!ready||!!shotArrow;
     aimPad.classList.toggle('disabled',!ready||!!shotArrow);
   }
   function resize(){
@@ -94,11 +101,12 @@
     const speed=Math.abs(currentWind), phase=performance.now()*.000018*(.45+speed*.11), direction=windDir;
     ctx.save();ctx.lineCap='round';
     for(let i=0;i<24;i++){
-      const lane=((i*.6180339887)%1), travel=((lane+phase*direction*.55)%1+1)%1;
-      const x=travel*w, y=h*(.12+((i*37)%77)/100)+Math.sin(phase*4+i*1.7)*5*scale;
+      const laneX=((i*.6180339887)%1), laneY=((i*.7548776662)%1);
+      const x=(((laneX+phase*direction.x*.55)%1+1)%1)*w;
+      const y=(((laneY+phase*direction.y*.55)%1+1)%1)*h+Math.sin(phase*4+i*1.7)*5*scale;
       const length=(8+Math.min(speed,8)*2.1)*(i%4===0?1.5:1)*scale;
       ctx.globalAlpha=.12+(i%3)*.035;ctx.strokeStyle=i%4===0?'#fff9e2':'#eef4d9';ctx.lineWidth=(i%4===0?1.4:.8)*scale;
-      ctx.beginPath();ctx.moveTo(x-direction*length,y);ctx.quadraticCurveTo(x-direction*length*.45,y-2*scale,x,y);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(x-direction.x*length,y-direction.y*length);ctx.quadraticCurveTo(x-direction.x*length*.45,y-direction.y*length*.45,x,y);ctx.stroke();
       if(i%3===0){ctx.globalAlpha=.24;ctx.fillStyle='#fff9e2';ctx.beginPath();ctx.arc(x,y,1.15*scale,0,Math.PI*2);ctx.fill()}
     }
     ctx.restore();
@@ -129,29 +137,43 @@
 
   const aimPad=$('aim-pad'), padKnob=$('pad-knob');
   function updateStick(e){
-    if(shotArrow||performance.now()<reloadUntil)return;
+    if(stickPointer!==e.pointerId||shotArrow||performance.now()<reloadUntil)return;
     const r=aimPad.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,max=(r.width-44)/2;
     let x=e.clientX-cx,y=e.clientY-cy,len=Math.hypot(x,y);
-    if(len>max){x=x/len*max;y=y/len*max;len=max}
+    if(len>max){x=x/len*max;y=y/len*max}
     stickVector={x:x/max,y:y/max};padKnob.style.transform=`translate(${x}px,${y}px)`;
     const reach=target.r*1.35;aim={x:stickVector.x*reach,y:stickVector.y*reach};
     $('scene-hint').classList.add('hidden');draw();
   }
   aimPad.addEventListener('pointerdown',e=>{
-    if(shotArrow||performance.now()<reloadUntil)return;
-    e.preventDefault();stickPointer=e.pointerId;aimPad.setPointerCapture(e.pointerId);updateStick(e);
+    if(shotArrow||performance.now()<reloadUntil||stickPointer!==null)return;
+    e.preventDefault();stickPointer=e.pointerId;stickStart={x:e.clientX,y:e.clientY,center:Math.hypot(e.clientX-(aimPad.getBoundingClientRect().left+aimPad.getBoundingClientRect().width/2),e.clientY-(aimPad.getBoundingClientRect().top+aimPad.getBoundingClientRect().height/2))<12};
+    aimPad.setPointerCapture(e.pointerId);
+    if(!stickStart.center)updateStick(e);
   });
-  aimPad.addEventListener('pointermove',e=>{if(stickPointer===e.pointerId)updateStick(e)});
-  function releaseStick(e){if(stickPointer!==e.pointerId)return;stickPointer=null;stickVector={x:0,y:0};padKnob.style.transform='translate(0,0)'}
-  aimPad.addEventListener('pointerup',releaseStick);aimPad.addEventListener('pointercancel',releaseStick);
-  $('loose-button').addEventListener('click',shoot);
+  aimPad.addEventListener('pointermove',e=>{
+    if(stickPointer!==e.pointerId)return;
+    if(stickStart&&Math.hypot(e.clientX-stickStart.x,e.clientY-stickStart.y)>10)stickStart.center=false;
+    updateStick(e);
+  });
+  function releaseStick(e,canceled=false){
+    if(stickPointer!==e.pointerId)return;
+    e.preventDefault();const fire=!!(stickStart&&stickStart.center&&!canceled&&Math.hypot(e.clientX-stickStart.x,e.clientY-stickStart.y)<=10);
+    stickPointer=null;stickStart=null;
+    if(aimPad.hasPointerCapture(e.pointerId))aimPad.releasePointerCapture(e.pointerId);
+    if(fire)shoot();
+  }
+  aimPad.addEventListener('pointerup',e=>releaseStick(e));
+  aimPad.addEventListener('pointercancel',e=>releaseStick(e,true));
+  aimPad.addEventListener('lostpointercapture',e=>{if(stickPointer===e.pointerId){stickPointer=null;stickStart=null}});
+  aimPad.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();shoot()}});
   function shoot(){
     if(shotArrow||performance.now()<reloadUntil){updateReloadUI();return}
     const area=areas[save.area], bowSteadiness=Math.max(.28,1-(save.bow-1)*.18), arrowDrift=Math.max(.25,1-(save.arrow-1)*.19);
-    const windDrift=windDir*currentWind*(area.distance/30)*2.05*arrowDrift;
+    const windDrift=currentWind*(area.distance/30)*2.05*arrowDrift;
     const spread=9.5*bowSteadiness*Math.max(.48,1-(save.arrow-1)*.13);
     const wobbleX=(Math.random()-.5)*spread, wobbleY=(Math.random()-.5)*spread;
-    const hitX=target.x+aim.x+windDrift+wobbleX, hitY=target.y+aim.y+wobbleY;
+    const hitX=target.x+aim.x+windDir.x*windDrift+wobbleX, hitY=target.y+aim.y+windDir.y*windDrift+wobbleY;
     shotArrow={x:hitX,y:hitY,fromX:dimensions.w*.115,fromY:dimensions.h*.72,start:performance.now(),duration:(580+area.distance*2.7)*(1-(save.bow-1)*.055),hit:true,windDrift};
     aim={x:0,y:0};stickVector={x:0,y:0};padKnob.style.transform='translate(0,0)';
     reloadUntil=performance.now()+reloadDuration(save.reload)*1000;
@@ -223,11 +245,11 @@
     document.querySelectorAll('.area-option').forEach(btn=>btn.addEventListener('click',()=>{const i=Number(btn.dataset.area);if(i<=save.area){changeArea(i);closeModal();return}const cost=areas[i].cost;if(save.coins>=cost){save.coins-=cost;changeArea(i);persist();updateUI();closeModal();toast(`${areas[i].name} unlocked!`)}else toast(`You need ${cost-save.coins} more coins to unlock this range.`)}));
   }
   function changeArea(i){save.area=i;aim={x:0,y:0};stickVector={x:0,y:0};padKnob.style.transform='translate(0,0)';windTick=0;setWind();updateUI();resize();toast(`Welcome to ${areas[i].name}`)}
-  $('help-button').addEventListener('click',()=>openModal('Find your <em>focus.</em>','A quiet hand, a little patience, and a good read of the breeze.',`<ol class="help-list"><li><b>Move the 360° stick</b> to steer your aim. Push farther for a wider correction.</li><li><b>Tap LOOSE</b> to fire. Your aim returns to center after each shot.</li><li>Wind pushes each arrow sideways. Aim <b>into the moving breeze</b> to compensate.</li><li>Land in the gold center for <b>3 coins</b>. Bow upgrades reduce wobble; arrow upgrades strongly resist wind. Quick nock shortens reloads.</li></ol><button class="modal-action" id="got-it">BACK TO THE RANGE</button>`));
+  $('help-button').addEventListener('click',()=>openModal('Find your <em>focus.</em>','A quiet hand, a little patience, and a good read of the breeze.',`<ol class="help-list"><li><b>Move the D-pad</b> to steer your aim. Push farther for a wider correction; your aim stays put when you lift your finger.</li><li><b>Tap the D-pad center</b> to shoot. Your aim returns to center after each shot.</li><li>The wind can blow in <b>six directions</b>. Aim against the arrow to compensate.</li><li>Land in the gold center for <b>3 coins</b>. Bow upgrades reduce wobble; arrow upgrades strongly resist wind. Quick nock shortens reloads.</li></ol><button class="modal-action" id="got-it">BACK TO THE RANGE</button>`));
   document.addEventListener('click',e=>{if(e.target.id==='got-it')closeModal()});
   $('upgrade-bow').addEventListener('click',()=>buyUpgrade('bow'));$('upgrade-arrow').addEventListener('click',()=>buyUpgrade('arrow'));$('upgrade-reload').addEventListener('click',()=>buyUpgrade('reload'));
   function buyUpgrade(type){const level=save[type],cost=upgradeCost(level,type);if(level>=5)return;if(save.coins<cost){toast(`You need ${cost-save.coins} more coins.`);return}save.coins-=cost;save[type]++;persist();updateUI();draw();toast(`${type==='bow'?'Bow':type==='arrow'?'Arrow':'Reload'} upgraded to level ${save[type]}!`);playSound('upgrade')}
-  function setWind(){const range=areas[save.area].wind;currentWind=+(Math.random()*(range[1]-range[0])+range[0]).toFixed(1);windDir=Math.random()<.5?-1:1;updateUI()}
+  function setWind(){const range=areas[save.area].wind;currentWind=Math.abs(Math.random()*(range[1]-range[0])+range[0]);currentWind=+currentWind.toFixed(1);windDir=windDirections[Math.floor(Math.random()*windDirections.length)];updateUI()}
   function animate(){if(!shotArrow){windTick+=1/60;if(windTick>13){windTick=0;setWind()} }updateReloadUI();draw();animationFrame=requestAnimationFrame(animate)}
   window.addEventListener('resize',resize,{passive:true});
   updateUI();resize();animate();
